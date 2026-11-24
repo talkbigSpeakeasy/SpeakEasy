@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Speakeasy – Listen</title>
+<style>
+:root{--bg:#f6f4fb;--fg:#1b1730;--card:#fff;--mut:#6b6584;--bd:#ddd8ee;--acc:#6d4aff}
+@media (prefers-color-scheme:dark){:root{--bg:#110e1f;--fg:#f1eefc;--card:#1c1833;--mut:#9a93b8;--bd:#2f2a50}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:480px;margin:0 auto;padding:28px 16px 40px;text-align:center}
+h1{margin:0 0 4px;font-size:26px}.sub{color:var(--mut);margin:0 0 18px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:16px;padding:16px;margin-bottom:14px}
+button{font:inherit;font-weight:700;border:0;border-radius:14px;padding:18px;width:100%;background:var(--acc);color:#fff;margin-top:10px;font-size:18px}
+button.alt{background:var(--card);color:var(--fg);border:2px solid var(--bd);font-size:16px}
+button:disabled{opacity:.5}
+input[type=text]{width:100%;padding:14px;border-radius:12px;border:2px solid var(--bd);background:var(--card);color:var(--fg);font:inherit;font-size:24px;text-align:center;text-transform:uppercase;letter-spacing:4px}
+input[type=range]{width:100%;margin:10px 0 0}
+.code{font-size:34px;font-weight:800;letter-spacing:6px;margin:4px 0}
+#st{color:var(--mut);margin-top:10px;min-height:22px}
+[hidden]{display:none!important}
+</style></head>
+<body><main>
+<h1>🎧 Speakeasy</h1>
+<p class="sub">Listen live on your own headphones.</p>
+
+<div class="card" id="pre">
+  <div id="have" hidden>
+    <div class="sub" style="margin:0">Room</div>
+    <div class="code" id="codeShow"></div>
+  </div>
+  <div id="need" hidden>
+    <div class="sub" style="margin-top:0">Enter the room code</div>
+    <input type="text" id="codeIn" maxlength="5" autocomplete="off" autocapitalize="characters">
+  </div>
+  <button id="go">Tap to listen</button>
+</div>
+
+<div class="card" id="live" hidden>
+  <div style="font-size:48px">🔊</div>
+  <label for="vol" class="sub" style="display:block;margin:6px 0 0">Volume</label>
+  <input type="range" id="vol" min="0" max="1" step="0.05" value="1">
+  <button id="leave" class="alt">Stop listening</button>
+</div>
+<div id="st"></div>
+<div id="audio"></div>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/livekit-client@2.20.2/dist/livekit-client.umd.min.js"></script>
+<script src="sd.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+const st = t => { $('#st').textContent = t; };
+let code = (new URLSearchParams(location.search).get('r') || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5);
+let room = null;
+if (code) { $('#have').hidden = false; $('#codeShow').textContent = code; }
+else $('#need').hidden = false;
+
+$('#go').onclick = async () => {
+  if (!code) code = $('#codeIn').value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5);
+  if (code.length !== 5) { st('Please enter the 5-character room code.'); code = ''; return; }
+  const b = $('#go'); b.disabled = true; st('Connecting…');
+  try {
+    const L = LivekitClient;
+    room = await SD.connect(code, 'listener');
+    await room.startAudio();
+    SD.keepAwake();
+    room.on(L.RoomEvent.TrackSubscribed, track => {
+      if (track.kind !== 'audio') return;
+      const el = track.attach();
+      el.volume = parseFloat($('#vol').value);
+      $('#audio').appendChild(el);
+      st('Listening. Keep this screen on.');
+    });
+    room.on(L.RoomEvent.TrackUnsubscribed, track => {
+      track.detach().forEach(e => e.remove());
+      st('The speaker paused. Waiting…');
+    });
+    room.on(L.RoomEvent.ParticipantDisconnected, () => {
+      if (room.remoteParticipants.size === 0) st('The speaker left.');
+    });
+    room.on(L.RoomEvent.Reconnecting, () => st('Connection hiccup, reconnecting…'));
+    room.on(L.RoomEvent.Reconnected, () => st('Listening. Keep this screen on.'));
+    room.on(L.RoomEvent.Disconnected, () => st('Disconnected.'));
+    room.on(L.RoomEvent.AudioPlaybackStatusChanged, () => {
+      if (!room.canPlaybackAudio) st('Tap the screen to enable sound.');
+    });
+    $('#pre').hidden = true; $('#live').hidden = false;
+    st(room.remoteParticipants.size ? 'Connecting audio…' : 'Connected. Waiting for the speaker to start…');
+  } catch (e) {
+    st('Could not connect: ' + (e && e.message ? e.message : e));
+    b.disabled = false;
+  }
+};
+$('#vol').oninput = () => {
+  document.querySelectorAll('#audio audio').forEach(a => { a.volume = parseFloat($('#vol').value); });
+};
+$('#leave').onclick = () => { if (room) room.disconnect(); location.reload(); };
+</script></body></html>

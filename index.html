@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Speakeasy – Host</title>
+<style>
+:root{--bg:#f6f4fb;--fg:#1b1730;--card:#fff;--mut:#6b6584;--bd:#ddd8ee;--acc:#6d4aff}
+@media (prefers-color-scheme:dark){:root{--bg:#110e1f;--fg:#f1eefc;--card:#1c1833;--mut:#9a93b8;--bd:#2f2a50}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:480px;margin:0 auto;padding:20px 16px 40px}
+h1{margin:0 0 4px;font-size:26px}.sub{color:var(--mut);margin:0 0 18px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:16px;padding:16px;margin-bottom:14px}
+button{font:inherit;font-weight:700;border:0;border-radius:14px;padding:16px;width:100%;background:var(--acc);color:#fff;margin-top:10px}
+button.alt{background:var(--card);color:var(--fg);border:2px solid var(--bd)}
+button.stop{background:#c0392b}
+button:disabled{opacity:.5}
+.code{font-size:40px;font-weight:800;letter-spacing:6px;text-align:center;margin:4px 0}
+.meter{height:14px;border-radius:7px;background:var(--bd);overflow:hidden;margin:8px 0}
+#lvl{height:100%;width:0;background:#2ecc71;transition:width .1s}
+#qr{background:#fff;padding:10px;border-radius:12px;width:max-content;max-width:100%;margin:12px auto 0}
+#qr svg{display:block;max-width:100%;height:auto}
+.link{word-break:break-all;font-size:14px;color:var(--mut);text-align:center}
+#st{color:var(--mut);font-size:14px;margin-top:8px;min-height:20px}
+[hidden]{display:none!important}
+</style></head>
+<body><main>
+<h1>🎙️ Speakeasy</h1>
+<p class="sub">Stream your voice to everyone’s own phone and headphones.</p>
+
+<div class="card" id="pre">
+  <p style="margin-top:0">Tap start, allow the microphone, then share the link or QR code with your audience.</p>
+  <button id="start">Start broadcasting</button>
+</div>
+
+<div id="live" hidden>
+  <div class="card">
+    <div class="sub" style="margin:0;text-align:center">Room code</div>
+    <div class="code" id="code"></div>
+    <div class="meter"><div id="lvl"></div></div>
+    <div id="count" class="sub" style="text-align:center;margin:0">0 listening</div>
+    <button id="mute" class="alt">Mute microphone</button>
+  </div>
+  <div class="card">
+    <div class="sub" style="margin:0 0 4px;text-align:center">Listeners scan this or open the link</div>
+    <div id="qr"></div>
+    <p class="link" id="url"></p>
+    <button id="share" class="alt">Share link</button>
+  </div>
+  <button id="stop" class="stop">Stop broadcasting</button>
+</div>
+<div id="st"></div>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/livekit-client@2.20.2/dist/livekit-client.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<script src="sd.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+const st = t => { $('#st').textContent = t; };
+const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+const code = Array.from({ length: 5 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
+let room = null, meterT = null, muted = false;
+
+const listenUrl = () => {
+  const u = new URL('listen.html', location.href);
+  u.searchParams.set('r', code);
+  return u.toString();
+};
+const updCount = () => {
+  const n = room ? room.remoteParticipants.size : 0;
+  $('#count').textContent = n + (n === 1 ? ' listening' : ' listening');
+};
+
+$('#start').onclick = async () => {
+  const b = $('#start'); b.disabled = true; st('Connecting…');
+  try {
+    room = await SD.connect(code, 'speaker', { echoCancellation: true, noiseSuppression: true, autoGainControl: true });
+    await room.localParticipant.setMicrophoneEnabled(true);
+    SD.keepAwake();
+    const L = LivekitClient;
+    room.on(L.RoomEvent.ParticipantConnected, updCount);
+    room.on(L.RoomEvent.ParticipantDisconnected, updCount);
+    room.on(L.RoomEvent.Disconnected, () => st('Disconnected.'));
+    room.on(L.RoomEvent.Reconnecting, () => st('Connection hiccup, reconnecting…'));
+    room.on(L.RoomEvent.Reconnected, () => st('You are live.'));
+    $('#code').textContent = code;
+    const url = listenUrl();
+    $('#url').textContent = url;
+    const q = qrcode(0, 'M'); q.addData(url); q.make();
+    $('#qr').innerHTML = q.createSvgTag(5, 2);
+    $('#pre').hidden = true; $('#live').hidden = false;
+    updCount(); st('You are live. Keep this screen open.');
+    meterT = setInterval(() => {
+      const l = room.localParticipant.audioLevel || 0;
+      $('#lvl').style.width = Math.min(100, Math.round(l * 160)) + '%';
+    }, 120);
+  } catch (e) {
+    st('Could not start: ' + (e && e.message ? e.message : e));
+    b.disabled = false;
+  }
+};
+
+$('#mute').onclick = async () => {
+  muted = !muted;
+  await room.localParticipant.setMicrophoneEnabled(!muted);
+  $('#mute').textContent = muted ? 'Unmute microphone' : 'Mute microphone';
+  st(muted ? 'Microphone is muted.' : 'You are live.');
+};
+$('#share').onclick = async () => {
+  const url = listenUrl();
+  try {
+    if (navigator.share) await navigator.share({ title: 'Listen live', url });
+    else { await navigator.clipboard.writeText(url); st('Link copied.'); }
+  } catch (e) {}
+};
+$('#stop').onclick = () => {
+  clearInterval(meterT);
+  if (room) room.disconnect();
+  location.reload();
+};
+</script></body></html>
