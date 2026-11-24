@@ -38,6 +38,8 @@ button:disabled{opacity:.5}
     <div class="code" id="code"></div>
     <div class="meter"><div id="lvl"></div></div>
     <div id="count" class="sub" style="text-align:center;margin:0">0 listening</div>
+    <div id="micLbl" class="sub" style="margin:8px 0 0;text-align:center;font-size:13px"></div>
+    <select id="micSel" hidden style="width:100%;margin-top:8px;padding:12px;border-radius:12px;border:2px solid var(--bd);background:var(--card);color:var(--fg);font:inherit"></select>
     <button id="mute" class="alt">Mute microphone</button>
   </div>
   <div class="card">
@@ -89,6 +91,7 @@ $('#start').onclick = async () => {
     $('#qr').innerHTML = q.createSvgTag(5, 2);
     $('#pre').hidden = true; $('#live').hidden = false;
     updCount(); st('You are live. Keep this screen open.');
+    initMic();
     meterT = setInterval(() => {
       const l = room.localParticipant.audioLevel || 0;
       $('#lvl').style.width = Math.min(100, Math.round(l * 160)) + '%';
@@ -98,6 +101,33 @@ $('#start').onclick = async () => {
     b.disabled = false;
   }
 };
+
+async function initMic() {
+  const L = LivekitClient;
+  const showLabel = () => {
+    const pub = room.localParticipant.getTrackPublication(L.Track.Source.Microphone);
+    const lbl = pub && pub.track ? pub.track.mediaStreamTrack.label : '';
+    $('#micLbl').textContent = lbl ? 'Microphone in use: ' + lbl : '';
+  };
+  showLabel();
+  try {
+    const devs = await L.Room.getLocalDevices('audioinput');
+    if (devs.length > 1) {
+      const sel = $('#micSel'); sel.innerHTML = '';
+      devs.forEach(d => {
+        const o = document.createElement('option');
+        o.value = d.deviceId; o.textContent = d.label || 'Microphone';
+        sel.appendChild(o);
+      });
+      try { const act = room.getActiveDevice('audioinput'); if (act) sel.value = act; } catch (e) {}
+      sel.hidden = false;
+      sel.onchange = async () => {
+        try { await room.switchActiveDevice('audioinput', sel.value); } catch (e) { st('Could not switch microphone.'); }
+        setTimeout(showLabel, 400);
+      };
+    }
+  } catch (e) {}
+}
 
 $('#mute').onclick = async () => {
   muted = !muted;
