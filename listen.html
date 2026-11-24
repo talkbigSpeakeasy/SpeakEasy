@@ -54,37 +54,49 @@ let room = null;
 if (code) { $('#have').hidden = false; $('#codeShow').textContent = code; }
 else $('#need').hidden = false;
 
+const attached = new WeakSet();
+function attach(track) {
+  if (track.kind !== 'audio' || attached.has(track)) return;
+  attached.add(track);
+  const el = track.attach();
+  el.volume = parseFloat($('#vol').value);
+  $('#audio').appendChild(el);
+  st('Listening. Keep this screen on.');
+}
+function wire(r) {
+  const L = LivekitClient;
+  r.on(L.RoomEvent.TrackSubscribed, attach);
+  r.on(L.RoomEvent.TrackUnsubscribed, track => {
+    attached.delete(track);
+    track.detach().forEach(e => e.remove());
+    st('The speaker paused. Waiting…');
+  });
+  r.on(L.RoomEvent.ParticipantDisconnected, () => {
+    if (r.remoteParticipants.size === 0) st('The speaker left.');
+  });
+  r.on(L.RoomEvent.Reconnecting, () => st('Connection hiccup, reconnecting…'));
+  r.on(L.RoomEvent.Reconnected, () => st('Listening. Keep this screen on.'));
+  r.on(L.RoomEvent.Disconnected, () => st('Disconnected.'));
+  r.on(L.RoomEvent.AudioPlaybackStatusChanged, () => {
+    if (!r.canPlaybackAudio) st('Tap the screen to enable sound.');
+  });
+}
+document.body.addEventListener('click', () => { if (room) room.startAudio().catch(() => {}); });
+
 $('#go').onclick = async () => {
   if (!code) code = $('#codeIn').value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5);
   if (code.length !== 5) { st('Please enter the 5-character room code.'); code = ''; return; }
   const b = $('#go'); b.disabled = true; st('Connecting…');
   try {
-    const L = LivekitClient;
-    room = await SD.connect(code, 'listener');
-    await room.startAudio();
+    room = await SD.connect(code, 'listener', null, wire);
+    try { await room.startAudio(); } catch (e) {}
     SD.keepAwake();
-    room.on(L.RoomEvent.TrackSubscribed, track => {
-      if (track.kind !== 'audio') return;
-      const el = track.attach();
-      el.volume = parseFloat($('#vol').value);
-      $('#audio').appendChild(el);
-      st('Listening. Keep this screen on.');
-    });
-    room.on(L.RoomEvent.TrackUnsubscribed, track => {
-      track.detach().forEach(e => e.remove());
-      st('The speaker paused. Waiting…');
-    });
-    room.on(L.RoomEvent.ParticipantDisconnected, () => {
-      if (room.remoteParticipants.size === 0) st('The speaker left.');
-    });
-    room.on(L.RoomEvent.Reconnecting, () => st('Connection hiccup, reconnecting…'));
-    room.on(L.RoomEvent.Reconnected, () => st('Listening. Keep this screen on.'));
-    room.on(L.RoomEvent.Disconnected, () => st('Disconnected.'));
-    room.on(L.RoomEvent.AudioPlaybackStatusChanged, () => {
-      if (!room.canPlaybackAudio) st('Tap the screen to enable sound.');
-    });
+    // Pick up any speaker audio that was already published before we joined.
+    room.remoteParticipants.forEach(p => p.audioTrackPublications.forEach(pub => { if (pub.track) attach(pub.track); }));
     $('#pre').hidden = true; $('#live').hidden = false;
-    st(room.remoteParticipants.size ? 'Connecting audio…' : 'Connected. Waiting for the speaker to start…');
+    if (!document.querySelector('#audio audio')) {
+      st(room.remoteParticipants.size ? 'Connecting audio…' : 'Connected. Waiting for the speaker to start…');
+    }
   } catch (e) {
     st('Could not connect: ' + (e && e.message ? e.message : e));
     b.disabled = false;
