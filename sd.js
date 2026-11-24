@@ -4,7 +4,11 @@ const SD = {
   tokenServerId: 'speakeasy-2j2qq5',
   async connect(code, name, audioDefaults) {
     const L = LivekitClient;
-    const source = L.TokenSource.developmentTokenServer(SD.tokenServerId);
+    const TS = L.TokenSource;
+    let source;
+    if (TS && TS.developmentTokenServer) source = TS.developmentTokenServer(SD.tokenServerId);
+    else if (TS && TS.sandboxTokenServer) source = TS.sandboxTokenServer(SD.tokenServerId);
+    else throw new Error('No token helper in this LiveKit version. Found: ' + Object.keys(TS || {}).join(', '));
     const { serverUrl, participantToken } = await source.fetch({
       roomName: 'sd-' + code,
       participantName: name,
